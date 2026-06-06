@@ -1,4 +1,5 @@
 Backups/
 Reports/
+dist/
 *.log
 *.tmp

@@ -10,6 +10,8 @@ const checks = [
   ["Category rules exist", existsSync(resolve(root, "Config", "Categories.json"))],
   ["Exclusion rules exist", existsSync(resolve(root, "Config", "Exclusions.json"))],
   ["README exists", existsSync(resolve(root, "README.md"))],
+  ["Release package script exists", existsSync(resolve(root, "tools", "New-ReleasePackage.ps1"))],
+  ["Windows smoke test script exists", existsSync(resolve(root, "tests", "Test-MWMT.ps1"))],
 ];
 
 if (existsSync(resolve(root, "Config", "Categories.json"))) {
@@ -22,6 +24,8 @@ if (existsSync(resolve(root, "Config", "Categories.json"))) {
   checks.push(["Business Apps include QuickBooks", businessText.includes("QuickBooks") && businessText.includes("*.QBW")]);
   checks.push(["Business Apps include Quicken", businessText.includes("Quicken") && businessText.includes("*.QDF")]);
   checks.push(["Business Apps include TurboTax", businessText.includes("TurboTax") && businessText.includes("*.tax")]);
+  checks.push(["Business Apps include Drake Lacerte ProSeries", ["Drake", "Lacerte", "ProSeries"].every((name) => businessText.includes(name))]);
+  checks.push(["Business Apps include TaxAct HRBlock Sage ACT", ["TaxAct", "H&R Block", "Sage", "ACT!"].every((name) => businessText.includes(name))]);
   const browserText = JSON.stringify(categories.categories.find((c) => c.id === "browsers") ?? {});
   checks.push(["Browsers include Chrome Edge Firefox Brave", ["Chrome", "Edge", "Firefox", "Brave"].every((name) => browserText.includes(name))]);
   const mailText = JSON.stringify(categories.categories.find((c) => c.id === "mail") ?? {});
@@ -38,7 +42,28 @@ if (existsSync(resolve(root, "MWMT.ps1"))) {
   checks.push(["MWMT backs up Windows license info", script.includes("function Export-MwmtWindowsLicense")]);
   checks.push(["MWMT backs up BitLocker info", script.includes("function Export-MwmtBitLockerInfo")]);
   checks.push(["MWMT supports offline Windows sources", script.includes("Get-PSDrive -PSProvider FileSystem") && script.includes("Windows") && script.includes("Users")]);
-  checks.push(["MWMT supports restore placeholder with warning", script.includes("Restore is planned for a later release")]);
+  checks.push(["MWMT supports restore workflow", script.includes("function Invoke-MwmtRestore") && script.includes("Select restore destination user")]);
+  checks.push(["MWMT prompts before overwrite", script.includes("Ask-MwmtYesNo") && script.includes("Overwrite existing files")]);
+  checks.push(["MWMT supports VHD mounting helper", script.includes("function Mount-MwmtWindowsImage") && script.includes("Mount-DiskImage")]);
+  checks.push(["MWMT supports Windows.old sources", script.includes("Windows.old") && script.includes("Offline Windows.old source")]);
+  checks.push(["MWMT supports manual source path", script.includes("function New-MwmtManualSource") && script.includes("Enter manual Windows source path")]);
+  checks.push(["MWMT supports dry run estimate", script.includes("function Get-MwmtBackupEstimate") && script.includes("Dry run / estimate only")]);
+  checks.push(["MWMT warns about OneDrive placeholders", script.includes("function Test-MwmtCloudPlaceholder") && script.includes("CloudPlaceholderWarning")]);
+  checks.push(["MWMT writes verification summary", script.includes("function Write-MwmtVerificationSummary") && script.includes("VerificationSummary.txt")]);
+  checks.push(["MWMT stores sensitive exports under System/Security", script.includes("System\\Security\\WindowsLicense.txt") && script.includes("System\\Security\\BitLocker.txt")]);
+  checks.push(["MWMT has release package command documented", read("README.md").includes("New-ReleasePackage.ps1")]);
+}
+
+if (existsSync(resolve(root, "tests", "Test-MWMT.ps1"))) {
+  const testScript = read("tests/Test-MWMT.ps1");
+  checks.push(["Windows smoke test parses MWMT", testScript.includes("Parser]::ParseFile")]);
+  checks.push(["Windows smoke test validates JSON", testScript.includes("ConvertFrom-Json")]);
+}
+
+if (existsSync(resolve(root, "tools", "New-ReleasePackage.ps1"))) {
+  const releaseScript = read("tools/New-ReleasePackage.ps1");
+  checks.push(["Release script excludes git and backups", releaseScript.includes(".git") && releaseScript.includes("Backups") && releaseScript.includes("Reports")]);
+  checks.push(["Release script creates zip", releaseScript.includes("Compress-Archive")]);
 }
 
 let failed = 0;

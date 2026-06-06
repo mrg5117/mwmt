@@ -53,7 +53,14 @@
         { "name": "Quicken Common Folders", "type": "folder", "relativePaths": [ "Documents\\Quicken", "AppData\\Roaming\\Intuit\\Quicken", "AppData\\Local\\Intuit\\Quicken" ] },
         { "name": "Quicken Data Files", "type": "extensionSearch", "roots": [ "profile", "publicDocuments" ], "patterns": [ "*.QDF", "*.QXF", "*.QPH", "*.QSD", "*.QEL" ] },
         { "name": "TurboTax Common Folders", "type": "folder", "relativePaths": [ "Documents\\TurboTax", "AppData\\Roaming\\Intuit\\TurboTax", "AppData\\Local\\Intuit\\TurboTax" ] },
-        { "name": "TurboTax Return Files", "type": "extensionSearch", "roots": [ "profile", "publicDocuments" ], "patterns": [ "*.tax20*", "*.tax2020", "*.tax2021", "*.tax2022", "*.tax2023", "*.tax2024", "*.tax2025", "*.tax2026" ] }
+        { "name": "TurboTax Return Files", "type": "extensionSearch", "roots": [ "profile", "publicDocuments" ], "patterns": [ "*.tax20*", "*.tax2020", "*.tax2021", "*.tax2022", "*.tax2023", "*.tax2024", "*.tax2025", "*.tax2026" ] },
+        { "name": "Drake Tax", "type": "folder", "absolutePathPatterns": [ "C:\\Drake*", "C:\\DRAKE*" ], "relativePaths": [ "Documents\\Drake" ] },
+        { "name": "Lacerte", "type": "folder", "absolutePathPatterns": [ "C:\\Lacerte*", "C:\\LACERTE*" ], "relativePaths": [ "Documents\\Lacerte" ] },
+        { "name": "ProSeries", "type": "folder", "absolutePathPatterns": [ "C:\\ProWin*", "C:\\PROSERIES*" ], "relativePaths": [ "Documents\\ProSeries" ] },
+        { "name": "TaxAct", "type": "folder", "relativePaths": [ "Documents\\TaxAct", "AppData\\Roaming\\TaxAct", "AppData\\Local\\TaxAct" ] },
+        { "name": "H&R Block", "type": "folder", "relativePaths": [ "Documents\\H&R Block", "AppData\\Roaming\\H&R Block", "AppData\\Local\\H&R Block" ] },
+        { "name": "Sage", "type": "folder", "relativePaths": [ "Documents\\Sage", "AppData\\Roaming\\Sage", "AppData\\Local\\Sage" ] },
+        { "name": "ACT!", "type": "folder", "relativePaths": [ "Documents\\ACT", "Documents\\ACT Data", "AppData\\Roaming\\ACT", "AppData\\Local\\ACT" ] }
       ]
     },
     {

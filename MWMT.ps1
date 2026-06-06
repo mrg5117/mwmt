@@ -11,6 +11,8 @@ $script:ConfigDir = Join-Path $script:Root "Config"
 $script:BackupRoot = Join-Path $script:Root "Backups"
 $script:ReportsRoot = Join-Path $script:Root "Reports"
 $script:Timestamp = Get-Date -Format "yyyy-MM-dd_HHmmss"
+$script:DryRunOnly = $false
+$script:CopyResults = @()
 
 foreach ($dir in @($script:BackupRoot, $script:ReportsRoot)) {
     if (-not (Test-Path $dir)) {
@@ -32,18 +34,81 @@ function Get-MwmtJson {
     return Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
 }
 
+function Ask-MwmtYesNo {
+    param(
+        [string]$Prompt,
+        [bool]$Default = $false
+    )
+
+    $defaultLabel = if ($Default) { "Y" } else { "N" }
+    $answer = Read-Host "$Prompt (Y/N, Enter = $defaultLabel)"
+    if ([string]::IsNullOrWhiteSpace($answer)) {
+        return $Default
+    }
+    return ($answer -match '^[Yy]')
+}
+
+function New-MwmtSourceObject {
+    param(
+        [string]$Id,
+        [string]$Name,
+        [string]$DriveRoot,
+        [string]$WindowsPath,
+        [string]$UsersPath,
+        [bool]$IsLive
+    )
+
+    return [pscustomobject]@{
+        Id = $Id
+        Name = $Name
+        DriveRoot = $DriveRoot
+        WindowsPath = $WindowsPath
+        UsersPath = $UsersPath
+        IsLive = $IsLive
+    }
+}
+
+function New-MwmtManualSource {
+    $manualPath = Read-Host "Enter manual Windows source path (example: E:\ or E:\Windows.old)"
+    if ([string]::IsNullOrWhiteSpace($manualPath)) { return $null }
+
+    $root = $manualPath.TrimEnd("\")
+    $windowsPath = Join-Path $root "Windows"
+    $usersPath = Join-Path $root "Users"
+    if ((Split-Path -Leaf $root) -ieq "Windows") {
+        $windowsPath = $root
+        $usersPath = Join-Path (Split-Path -Parent $root) "Users"
+    }
+
+    if (-not (Test-Path $usersPath)) {
+        Write-MwmtLog "Manual source rejected because Users folder was not found: $usersPath"
+        return $null
+    }
+
+    return New-MwmtSourceObject "manual" "Manual Windows source ($root)" $root $windowsPath $usersPath $false
+}
+
+function Mount-MwmtWindowsImage {
+    if (-not (Get-Command Mount-DiskImage -ErrorAction SilentlyContinue)) {
+        Write-MwmtLog "Mount-DiskImage is unavailable on this system."
+        return
+    }
+
+    $imagePath = Read-Host "Enter VHD/VHDX/ISO image path to mount"
+    if ([string]::IsNullOrWhiteSpace($imagePath) -or -not (Test-Path $imagePath)) {
+        Write-MwmtLog "Image path not found: $imagePath"
+        return
+    }
+
+    Write-MwmtLog "Mounting image: $imagePath"
+    Mount-DiskImage -ImagePath $imagePath | Out-Null
+}
+
 function Get-MwmtSource {
     $sources = @()
     $liveUsers = Join-Path $env:SystemDrive "Users"
     if (Test-Path $liveUsers) {
-        $sources += [pscustomobject]@{
-            Id = "live"
-            Name = "Current Windows install ($env:SystemDrive)"
-            DriveRoot = "$env:SystemDrive\"
-            WindowsPath = Join-Path $env:SystemDrive "Windows"
-            UsersPath = $liveUsers
-            IsLive = $true
-        }
+        $sources += New-MwmtSourceObject "live" "Current Windows install ($env:SystemDrive)" "$env:SystemDrive\" (Join-Path $env:SystemDrive "Windows") $liveUsers $true
     }
 
     Get-PSDrive -PSProvider FileSystem | ForEach-Object {
@@ -51,14 +116,13 @@ function Get-MwmtSource {
         $windowsPath = Join-Path $driveRoot "Windows"
         $usersPath = Join-Path $driveRoot "Users"
         if ((Test-Path $windowsPath) -and (Test-Path $usersPath) -and ($driveRoot -ne "$env:SystemDrive\")) {
-            $sources += [pscustomobject]@{
-                Id = $_.Name
-                Name = "Offline Windows source ($driveRoot)"
-                DriveRoot = $driveRoot
-                WindowsPath = $windowsPath
-                UsersPath = $usersPath
-                IsLive = $false
-            }
+            $sources += New-MwmtSourceObject $_.Name "Offline Windows source ($driveRoot)" $driveRoot $windowsPath $usersPath $false
+        }
+
+        $windowsOldPath = Join-Path $driveRoot "Windows.old\Windows"
+        $windowsOldUsers = Join-Path $driveRoot "Windows.old\Users"
+        if ((Test-Path $windowsOldPath) -and (Test-Path $windowsOldUsers)) {
+            $sources += New-MwmtSourceObject "$($_.Name)_WindowsOld" "Offline Windows.old source ($driveRoot Windows.old)" (Join-Path $driveRoot "Windows.old") $windowsOldPath $windowsOldUsers $false
         }
     }
 
@@ -137,6 +201,90 @@ function New-MwmtBackupSet {
     return $target
 }
 
+function Add-MwmtCopyResult {
+    param(
+        [string]$SourcePath,
+        [string]$DestinationPath,
+        [string]$Status,
+        [int]$ExitCode = -1
+    )
+
+    $script:CopyResults += [pscustomobject]@{
+        SourcePath = $SourcePath
+        DestinationPath = $DestinationPath
+        Status = $Status
+        ExitCode = $ExitCode
+    }
+}
+
+function Get-MwmtFolderSize {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return 0 }
+    $size = 0
+    Get-ChildItem -Path $Path -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        if (-not $_.PSIsContainer) { $size += $_.Length }
+    }
+    return $size
+}
+
+function Test-MwmtCloudPlaceholder {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return $false }
+    $item = Get-Item -Path $Path -Force -ErrorAction SilentlyContinue
+    if (-not $item) { return $false }
+    $attributes = $item.Attributes.ToString()
+    return ($attributes -match "Offline" -or $attributes -match "RecallOnDataAccess" -or $attributes -match "Unpinned")
+}
+
+function Get-MwmtBackupEstimate {
+    param(
+        [array]$Profiles,
+        [array]$Categories,
+        [pscustomobject]$Source
+    )
+
+    $totalBytes = 0
+    $foundItems = 0
+    $warnings = @()
+
+    foreach ($profile in $Profiles) {
+        foreach ($category in $Categories) {
+            foreach ($rule in $category.rules) {
+                if ($rule.type -eq "folder") {
+                    foreach ($relative in $rule.relativePaths) {
+                        $path = Join-Path $profile.Path $relative
+                        if (Test-Path $path) {
+                            $foundItems++
+                            $totalBytes += Get-MwmtFolderSize $path
+                            if (Test-MwmtCloudPlaceholder $path) {
+                                $warnings += "CloudPlaceholderWarning: $path may contain cloud-only placeholder content."
+                            }
+                        }
+                    }
+                }
+                if ($rule.type -eq "folderPattern") {
+                    foreach ($pattern in $rule.relativePatterns) {
+                        Get-ChildItem -Path $profile.Path -Directory -Filter $pattern -ErrorAction SilentlyContinue | ForEach-Object {
+                            $foundItems++
+                            $totalBytes += Get-MwmtFolderSize $_.FullName
+                            if (Test-MwmtCloudPlaceholder $_.FullName) {
+                                $warnings += "CloudPlaceholderWarning: $($_.FullName) may contain cloud-only placeholder content."
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        FoundItems = $foundItems
+        TotalBytes = $totalBytes
+        TotalGB = [math]::Round(($totalBytes / 1GB), 2)
+        Warnings = $warnings
+    }
+}
+
 function Copy-MwmtFolder {
     param(
         [string]$SourcePath,
@@ -146,9 +294,13 @@ function Copy-MwmtFolder {
         [string]$LogPath
     )
 
-    if (-not (Test-Path $SourcePath)) { return $false }
-    if ($WhatIfMode) {
+    if (-not (Test-Path $SourcePath)) {
+        Add-MwmtCopyResult $SourcePath $DestinationPath "Missing" -1
+        return $false
+    }
+    if ($WhatIfMode -or $script:DryRunOnly) {
         Write-MwmtLog "WHATIF: robocopy $SourcePath -> $DestinationPath"
+        Add-MwmtCopyResult $SourcePath $DestinationPath "WhatIf" 0
         return $true
     }
 
@@ -170,7 +322,9 @@ function Copy-MwmtFolder {
 
     Write-MwmtLog "Copying $SourcePath"
     $process = Start-Process -FilePath "robocopy.exe" -ArgumentList $args -Wait -PassThru -NoNewWindow
-    return ($process.ExitCode -le 7)
+    $ok = ($process.ExitCode -le 7)
+    Add-MwmtCopyResult $SourcePath $DestinationPath $(if ($ok) { "Copied" } else { "Failed" }) $process.ExitCode
+    return $ok
 }
 
 function Add-MwmtManifestRow {
@@ -234,6 +388,19 @@ function Invoke-MwmtRule {
             $ok = Copy-MwmtFolder $sourcePath $targetPath $FolderExclusions $FileExclusions $RoboLog
             Add-MwmtManifestRow $ManifestPath $Profile.Name $Category.name $Rule.name $sourcePath $targetPath $(if ($ok) { "Copied" } else { "MissingOrFailed" })
         }
+        if ($Rule.absolutePathPatterns) {
+            foreach ($pattern in $Rule.absolutePathPatterns) {
+                $sourcePattern = $pattern
+                if ($Source.DriveRoot -and $Source.DriveRoot -ne "C:\") {
+                    $sourcePattern = Join-Path $Source.DriveRoot $pattern.Substring(3)
+                }
+                Get-ChildItem -Path $sourcePattern -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                    $targetPath = Join-Path $categoryTargetRoot ("absolute_" + ($_.FullName -replace '[\\/:*?"<>|]', '_'))
+                    $ok = Copy-MwmtFolder $_.FullName $targetPath $FolderExclusions $FileExclusions $RoboLog
+                    Add-MwmtManifestRow $ManifestPath $Profile.Name $Category.name $Rule.name $_.FullName $targetPath $(if ($ok) { "Copied" } else { "MissingOrFailed" })
+                }
+            }
+        }
     }
 
     if ($Rule.type -eq "folderPattern") {
@@ -257,6 +424,7 @@ function Invoke-MwmtRule {
                         New-Item -Path (Split-Path -Parent $targetPath) -ItemType Directory -Force | Out-Null
                         Copy-Item -Path $_.FullName -Destination $targetPath -Force
                     }
+                    Add-MwmtCopyResult $_.FullName $targetPath "Copied" 0
                     Add-MwmtManifestRow $ManifestPath $Profile.Name $Category.name $Rule.name $_.FullName $targetPath "Copied"
                 }
             }
@@ -273,10 +441,35 @@ function Invoke-MwmtRule {
     }
 }
 
+function Write-MwmtVerificationSummary {
+    param([string]$BackupSet)
+
+    $target = Join-Path $BackupSet "VerificationSummary.txt"
+    $copied = @($script:CopyResults | Where-Object { $_.Status -eq "Copied" }).Count
+    $failed = @($script:CopyResults | Where-Object { $_.Status -eq "Failed" }).Count
+    $missing = @($script:CopyResults | Where-Object { $_.Status -eq "Missing" }).Count
+    $whatIf = @($script:CopyResults | Where-Object { $_.Status -eq "WhatIf" }).Count
+
+    $lines = @()
+    $lines += "MWMT Verification Summary"
+    $lines += "Collected: $(Get-Date -Format s)"
+    $lines += "Copied: $copied"
+    $lines += "Failed: $failed"
+    $lines += "Missing: $missing"
+    $lines += "DryRun/WhatIf: $whatIf"
+    $lines += ""
+    $lines += "Robocopy exit codes 0-7 are treated as successful. Exit code 8 or higher needs review."
+    $lines += ""
+    $lines += ($script:CopyResults | Format-Table -AutoSize | Out-String)
+
+    $lines | Set-Content -Path $target -Encoding UTF8
+    Write-MwmtLog "Verification summary saved to $target"
+}
+
 function Export-MwmtWindowsLicense {
     param([string]$BackupSet)
 
-    $target = Join-Path $BackupSet "System\WindowsLicense.txt"
+    $target = Join-Path $BackupSet "System\Security\WindowsLicense.txt"
     New-Item -Path (Split-Path -Parent $target) -ItemType Directory -Force | Out-Null
 
     $lines = @()
@@ -308,10 +501,11 @@ function Export-MwmtWindowsLicense {
 function Export-MwmtBitLockerInfo {
     param([string]$BackupSet)
 
-    $target = Join-Path $BackupSet "System\BitLocker.txt"
+    $target = Join-Path $BackupSet "System\Security\BitLocker.txt"
     New-Item -Path (Split-Path -Parent $target) -ItemType Directory -Force | Out-Null
     $lines = @()
     $lines += "BitLocker Export"
+    $lines += "Sensitive: BitLocker recovery keys can unlock customer data. Store and dispose of this report carefully."
     $lines += "Computer: $env:COMPUTERNAME"
     $lines += "Collected: $(Get-Date -Format s)"
     $lines += ""
@@ -341,7 +535,14 @@ function Export-MwmtBitLockerInfo {
 function Invoke-MwmtBackup {
     $categoryConfig = Get-MwmtJson (Join-Path $script:ConfigDir "Categories.json")
     $exclusionConfig = Get-MwmtJson (Join-Path $script:ConfigDir "Exclusions.json")
+    if (Ask-MwmtYesNo "Mount a VHD/VHDX/ISO image before source detection?" $false) {
+        Mount-MwmtWindowsImage
+    }
     $sources = @(Get-MwmtSource)
+    if (Ask-MwmtYesNo "Add a manual source path?" $false) {
+        $manualSource = New-MwmtManualSource
+        if ($manualSource) { $sources += $manualSource }
+    }
     if ($sources.Count -eq 0) {
         Write-MwmtLog "No Windows sources found."
         return
@@ -361,6 +562,13 @@ function Invoke-MwmtBackup {
         return
     }
 
+    $estimate = Get-MwmtBackupEstimate $selectedProfiles $selectedCategories $source
+    Write-MwmtLog "Estimate: $($estimate.FoundItems) folder item(s), about $($estimate.TotalGB) GB before exclusions."
+    foreach ($warning in $estimate.Warnings) {
+        Write-MwmtLog $warning
+    }
+    $script:DryRunOnly = Ask-MwmtYesNo "Dry run / estimate only?" $false
+
     $backupSet = New-MwmtBackupSet $source
     $manifestPath = Join-Path $backupSet "manifest.csv"
     $roboLog = Join-Path $backupSet "robocopy.log"
@@ -377,7 +585,152 @@ function Invoke-MwmtBackup {
         }
     }
 
+    Write-MwmtVerificationSummary $backupSet
     Write-MwmtLog "Backup complete. Manifest: $manifestPath"
+}
+
+function Get-MwmtBackupSet {
+    if (-not (Test-Path $script:BackupRoot)) { return @() }
+    Get-ChildItem -Path $script:BackupRoot -Directory | Where-Object {
+        Test-Path (Join-Path $_.FullName "manifest.csv")
+    } | Sort-Object LastWriteTime -Descending | ForEach-Object {
+        [pscustomobject]@{
+            Name = "$($_.Name) - $($_.LastWriteTime)"
+            Path = $_.FullName
+        }
+    }
+}
+
+function Get-MwmtLiveDestinationProfile {
+    $source = New-MwmtSourceObject "live" "Current Windows install ($env:SystemDrive)" "$env:SystemDrive\" (Join-Path $env:SystemDrive "Windows") (Join-Path $env:SystemDrive "Users") $true
+    return @(Get-MwmtUserProfile $source)
+}
+
+function Copy-MwmtRestoreFolder {
+    param(
+        [string]$SourcePath,
+        [string]$DestinationPath,
+        [bool]$Overwrite
+    )
+
+    if (-not (Test-Path $SourcePath)) {
+        Write-MwmtLog "Restore source missing: $SourcePath"
+        return $false
+    }
+    if ((Test-Path $DestinationPath) -and (-not $Overwrite)) {
+        Write-MwmtLog "Skipped existing destination: $DestinationPath"
+        return $false
+    }
+    if ($WhatIfMode) {
+        Write-MwmtLog "WHATIF: restore $SourcePath -> $DestinationPath"
+        return $true
+    }
+
+    $args = @("`"$SourcePath`"", "`"$DestinationPath`"", "/E", "/COPY:DAT", "/DCOPY:DAT", "/R:2", "/W:2", "/XJ", "/FFT", "/TEE", "/NP")
+    $process = Start-Process -FilePath "robocopy.exe" -ArgumentList $args -Wait -PassThru -NoNewWindow
+    return ($process.ExitCode -le 7)
+}
+
+function Copy-MwmtRestoreItem {
+    param(
+        [string]$SourcePath,
+        [string]$DestinationPath,
+        [bool]$Overwrite
+    )
+
+    if (-not (Test-Path $SourcePath)) {
+        Write-MwmtLog "Restore source missing: $SourcePath"
+        return $false
+    }
+
+    $item = Get-Item -Path $SourcePath -Force
+    if ($item.PSIsContainer) {
+        return Copy-MwmtRestoreFolder $SourcePath $DestinationPath $Overwrite
+    }
+
+    if ((Test-Path $DestinationPath) -and (-not $Overwrite)) {
+        Write-MwmtLog "Skipped existing file: $DestinationPath"
+        return $false
+    }
+    if ($WhatIfMode) {
+        Write-MwmtLog "WHATIF: restore file $SourcePath -> $DestinationPath"
+        return $true
+    }
+
+    New-Item -Path (Split-Path -Parent $DestinationPath) -ItemType Directory -Force | Out-Null
+    Copy-Item -Path $SourcePath -Destination $DestinationPath -Force
+    return $true
+}
+
+function Invoke-MwmtRestore {
+    $backupSets = @(Get-MwmtBackupSet)
+    if ($backupSets.Count -eq 0) {
+        Write-MwmtLog "No backup sets found in $script:BackupRoot."
+        return
+    }
+
+    $backupSet = Select-MwmtSingle "Select backup set to restore" $backupSets
+    $manifestPath = Join-Path $backupSet.Path "manifest.csv"
+    $manifest = @(Import-Csv -Path $manifestPath)
+    if ($manifest.Count -eq 0) {
+        Write-MwmtLog "Manifest is empty: $manifestPath"
+        return
+    }
+
+    $users = @($manifest | Where-Object { $_.UserName -ne "Public" } | Select-Object -ExpandProperty UserName -Unique | ForEach-Object {
+        [pscustomobject]@{ Name = $_; Value = $_ }
+    })
+    $backupUser = Select-MwmtSingle "Select backed-up user" $users
+
+    $categories = @($manifest | Where-Object { $_.UserName -eq $backupUser.Value -or $_.UserName -eq "Public" } | Select-Object -ExpandProperty Category -Unique | ForEach-Object {
+        [pscustomobject]@{ Name = $_; Value = $_ }
+    })
+    $selectedCategories = @(Select-MwmtMany "Select categories to restore" $categories)
+
+    $destinations = @(Get-MwmtLiveDestinationProfile)
+    if ($destinations.Count -eq 0) {
+        Write-MwmtLog "No live destination profiles found."
+        return
+    }
+    $destinationUser = Select-MwmtSingle "Select restore destination user" $destinations
+    $overwrite = Ask-MwmtYesNo "Overwrite existing files during restore?" $false
+
+    foreach ($category in $selectedCategories) {
+        $rows = @($manifest | Where-Object {
+            ($_.UserName -eq $backupUser.Value -or $_.UserName -eq "Public") -and $_.Category -eq $category.Value -and $_.Status -eq "Copied"
+        })
+        foreach ($row in $rows) {
+            $backupPath = $row.DestinationPath
+            if (-not (Test-Path $backupPath)) { continue }
+
+            $sourcePath = $row.SourcePath
+            if ($row.UserName -eq "Public") {
+                $publicMarker = "\Users\Public\"
+                $markerIndex = $sourcePath.IndexOf($publicMarker, [System.StringComparison]::OrdinalIgnoreCase)
+                if ($markerIndex -ge 0) {
+                    $relative = $sourcePath.Substring($markerIndex + $publicMarker.Length)
+                } else {
+                    $relative = Split-Path -Leaf $sourcePath
+                }
+                $targetPath = Join-Path (Join-Path "$env:SystemDrive\Users" "Public") $relative
+            } else {
+                $userMarker = "\Users\$($backupUser.Value)\"
+                $markerIndex = $sourcePath.IndexOf($userMarker, [System.StringComparison]::OrdinalIgnoreCase)
+                if ($markerIndex -ge 0) {
+                    $relative = $sourcePath.Substring($markerIndex + $userMarker.Length)
+                    $targetPath = Join-Path $destinationUser.Path $relative
+                } else {
+                    $absoluteRestoreRoot = Join-Path $script:ReportsRoot "ManualAbsoluteRestore_$script:Timestamp"
+                    $relative = ($sourcePath -replace '[\\/:*?"<>|]', '_')
+                    $targetPath = Join-Path $absoluteRestoreRoot $relative
+                }
+            }
+
+            Copy-MwmtRestoreItem $backupPath $targetPath $overwrite | Out-Null
+        }
+    }
+
+    Write-MwmtLog "Restore workflow finished. Review the log for skipped or failed items."
 }
 
 function Show-MwmtMenu {
@@ -386,6 +739,7 @@ function Show-MwmtMenu {
     Write-Host "  1 = Backup data"
     Write-Host "  2 = Restore / migrate data"
     Write-Host "  3 = Export Windows license and BitLocker only"
+    Write-Host "  4 = Mount VHD/VHDX/ISO image"
     Write-Host "  Q = Quit"
     return Read-Host "Choice"
 }
@@ -394,12 +748,13 @@ Write-MwmtLog "MWMT started from $script:Root"
 
 switch (Show-MwmtMenu) {
     "1" { Invoke-MwmtBackup }
-    "2" { Write-MwmtLog "Restore is planned for a later release. Use backup mode first." }
+    "2" { Invoke-MwmtRestore }
     "3" {
         $backupSet = Join-Path $script:ReportsRoot "SystemInfo_$script:Timestamp"
         New-Item -Path $backupSet -ItemType Directory -Force | Out-Null
         Export-MwmtWindowsLicense $backupSet
         Export-MwmtBitLockerInfo $backupSet
     }
+    "4" { Mount-MwmtWindowsImage }
     default { Write-MwmtLog "MWMT closed." }
 }
