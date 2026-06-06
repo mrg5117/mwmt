@@ -1,0 +1,23 @@
+{
+  "defaultFolderExclusions": [
+    "Cache",
+    "Code Cache",
+    "GPUCache",
+    "Service Worker\\CacheStorage",
+    "Temp",
+    "Temporary Internet Files",
+    "$Recycle.Bin",
+    "System Volume Information",
+    "node_modules"
+  ],
+  "defaultFileExclusions": [
+    "*.tmp",
+    "*.temp",
+    "*.etl",
+    "*.log",
+    "pagefile.sys",
+    "hiberfil.sys",
+    "swapfile.sys",
+    "NTUSER.DAT.LOG*"
+  ]
+}

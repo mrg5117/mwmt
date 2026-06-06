@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "categories": [
+    {
+      "id": "personal",
+      "name": "Personal Folders",
+      "description": "Desktop, Documents, Downloads, Pictures, Music, Videos, Favorites, and user fonts.",
+      "rules": [
+        { "name": "Desktop", "type": "folder", "relativePaths": [ "Desktop" ] },
+        { "name": "Documents", "type": "folder", "relativePaths": [ "Documents" ] },
+        { "name": "Downloads", "type": "folder", "relativePaths": [ "Downloads" ] },
+        { "name": "Pictures", "type": "folder", "relativePaths": [ "Pictures" ] },
+        { "name": "Music", "type": "folder", "relativePaths": [ "Music" ] },
+        { "name": "Videos", "type": "folder", "relativePaths": [ "Videos" ] },
+        { "name": "Favorites", "type": "folder", "relativePaths": [ "Favorites" ] },
+        { "name": "User Fonts", "type": "folder", "relativePaths": [ "AppData\\Local\\Microsoft\\Windows\\Fonts" ] }
+      ]
+    },
+    {
+      "id": "browsers",
+      "name": "Web Browsers",
+      "description": "Common browser profile data and bookmarks.",
+      "rules": [
+        { "name": "Google Chrome", "type": "folder", "relativePaths": [ "AppData\\Local\\Google\\Chrome\\User Data" ] },
+        { "name": "Microsoft Edge", "type": "folder", "relativePaths": [ "AppData\\Local\\Microsoft\\Edge\\User Data" ] },
+        { "name": "Mozilla Firefox", "type": "folder", "relativePaths": [ "AppData\\Roaming\\Mozilla\\Firefox" ] },
+        { "name": "Brave", "type": "folder", "relativePaths": [ "AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data" ] },
+        { "name": "Opera", "type": "folder", "relativePaths": [ "AppData\\Roaming\\Opera Software" ] },
+        { "name": "Vivaldi", "type": "folder", "relativePaths": [ "AppData\\Local\\Vivaldi\\User Data" ] }
+      ]
+    },
+    {
+      "id": "mail",
+      "name": "Mail",
+      "description": "Outlook, Thunderbird, Windows mail client data, and signatures.",
+      "rules": [
+        { "name": "Outlook Documents", "type": "folder", "relativePaths": [ "Documents\\Outlook Files" ] },
+        { "name": "Outlook AppData", "type": "folder", "relativePaths": [ "AppData\\Local\\Microsoft\\Outlook" ] },
+        { "name": "Outlook Signatures", "type": "folder", "relativePaths": [ "AppData\\Roaming\\Microsoft\\Signatures" ] },
+        { "name": "Thunderbird", "type": "folder", "relativePaths": [ "AppData\\Roaming\\Thunderbird" ] },
+        { "name": "Windows Live Mail", "type": "folder", "relativePaths": [ "AppData\\Local\\Microsoft\\Windows Live Mail" ] },
+        { "name": "PST Files", "type": "extensionSearch", "roots": [ "profile", "publicDocuments" ], "patterns": [ "*.pst" ] },
+        { "name": "OST Files", "type": "extensionSearch", "roots": [ "profile" ], "patterns": [ "*.ost" ] }
+      ]
+    },
+    {
+      "id": "business_apps",
+      "name": "Business Apps",
+      "description": "QuickBooks, Quicken, TurboTax, and similar customer business data.",
+      "rules": [
+        { "name": "QuickBooks Common Folders", "type": "folder", "relativePaths": [ "Documents\\Intuit", "Documents\\QuickBooks", "AppData\\Local\\Intuit", "AppData\\Roaming\\Intuit" ] },
+        { "name": "QuickBooks Company Files", "type": "extensionSearch", "roots": [ "profile", "publicDocuments", "driveRoot" ], "patterns": [ "*.QBW", "*.QBB", "*.QBM", "*.ND", "*.TLG" ] },
+        { "name": "Quicken Common Folders", "type": "folder", "relativePaths": [ "Documents\\Quicken", "AppData\\Roaming\\Intuit\\Quicken", "AppData\\Local\\Intuit\\Quicken" ] },
+        { "name": "Quicken Data Files", "type": "extensionSearch", "roots": [ "profile", "publicDocuments" ], "patterns": [ "*.QDF", "*.QXF", "*.QPH", "*.QSD", "*.QEL" ] },
+        { "name": "TurboTax Common Folders", "type": "folder", "relativePaths": [ "Documents\\TurboTax", "AppData\\Roaming\\Intuit\\TurboTax", "AppData\\Local\\Intuit\\TurboTax" ] },
+        { "name": "TurboTax Return Files", "type": "extensionSearch", "roots": [ "profile", "publicDocuments" ], "patterns": [ "*.tax20*", "*.tax2020", "*.tax2021", "*.tax2022", "*.tax2023", "*.tax2024", "*.tax2025", "*.tax2026" ] }
+      ]
+    },
+    {
+      "id": "cloud_sync",
+      "name": "Cloud Sync Folders",
+      "description": "Common local sync folders. Operators should verify cloud-only placeholders separately.",
+      "rules": [
+        { "name": "OneDrive", "type": "folderPattern", "relativePatterns": [ "OneDrive*" ] },
+        { "name": "Dropbox", "type": "folder", "relativePaths": [ "Dropbox" ] },
+        { "name": "Google Drive", "type": "folder", "relativePaths": [ "Google Drive", "My Drive" ] }
+      ]
+    },
+    {
+      "id": "public_data",
+      "name": "Public Data",
+      "description": "Public Desktop, Documents, Downloads, Pictures, Music, and Videos.",
+      "rules": [
+        { "name": "Public User Folders", "type": "publicFolders", "relativePaths": [ "Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos" ] }
+      ]
+    }
+  ]
+}
